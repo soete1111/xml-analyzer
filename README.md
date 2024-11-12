@@ -16,7 +16,7 @@ A Spring Boot application that analyzes XML files containing Stack Overflow post
 2. Run `mvn clean install` to build the application
 3. Run `mvn spring-boot:run` to start the application
 
-### Using Docker(https://hub.docker.com)
+### Using Docker(https://hub.docker.com/r/soete/xml-analyzer)
 
 1. Run `docker run -d -p 8080:8080 soete/xml-analyzer` to build and start the application
 
