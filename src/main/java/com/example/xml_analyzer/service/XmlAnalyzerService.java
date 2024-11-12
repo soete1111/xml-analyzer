@@ -1,24 +1,31 @@
 package com.example.xml_analyzer.service;
 
+import java.io.BufferedInputStream;
+import java.io.ByteArrayInputStream;
+import java.io.InputStream;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.Optional;
+
+import javax.xml.parsers.SAXParser;
+import javax.xml.parsers.SAXParserFactory;
+
+import org.springframework.stereotype.Service;
+import org.springframework.web.client.RestTemplate;
+import org.xml.sax.Attributes;
+import org.xml.sax.InputSource;
+import org.xml.sax.helpers.DefaultHandler;
+
 import com.example.xml_analyzer.exception.XmlAnalysisException;
 import com.example.xml_analyzer.model.AnalysisResponse;
 import com.example.xml_analyzer.model.Details;
-import org.springframework.stereotype.Service;
-import org.springframework.web.client.RestTemplate;
-import javax.xml.stream.XMLInputFactory;
-import javax.xml.stream.XMLStreamConstants;
-import javax.xml.stream.XMLStreamException;
-import javax.xml.stream.XMLStreamReader;
-import java.io.IOException;
-import java.io.InputStream;
-import java.net.URL;
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
 
 @Service
 public class XmlAnalyzerService {
     private final RestTemplate restTemplate;
+
     private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSS");
+    private static final String FILE_PATH = "src/test/java/com/example/xml_analyzer/resources/3dprinting-posts.xml";
 
     public XmlAnalyzerService(RestTemplate restTemplate) {
         this.restTemplate = restTemplate;
@@ -28,71 +35,123 @@ public class XmlAnalyzerService {
         AnalysisResponse response = new AnalysisResponse();
         response.setAnalyseDate(LocalDateTime.now());
         response.setFileName(extractFileName(url));
+
         Details details = new Details();
+        TimingMetrics timing = new TimingMetrics();
 
-        try (InputStream inputStream = new URL(url).openStream()) {
-            XMLInputFactory factory = XMLInputFactory.newInstance();
-            factory.setProperty(XMLInputFactory.IS_SUPPORTING_EXTERNAL_ENTITIES, false);
-            factory.setProperty(XMLInputFactory.SUPPORT_DTD, false);
-            
-            XMLStreamReader reader = factory.createXMLStreamReader(inputStream);
+        try {
+            timing.startDownload();
 
-            long totalPosts = 0;
-            long totalAcceptedPosts = 0;
-            double scoreSum = 0;
-            LocalDateTime firstPost = null;
-            LocalDateTime lastPost = null;
+            /*
+             * For local testing
+             * try (InputStream stream = new BufferedInputStream(
+             * new FileInputStream(FILE_PATH),
+             * 64 * 1024)) {
+             */
+            try (InputStream stream = new BufferedInputStream(
+                    new ByteArrayInputStream(restTemplate.getForObject(url, byte[].class)),
+                    64 * 1024)) {
 
-            while (reader.hasNext()) {
-                int event = reader.next();
+                /*
+                 * First approach: XMLStreamReader
+                 * XMLStreamReader not slower than SAXParser for bigger files, but whatever
+                 * XMLStreamReader reader = createXmlReader(stream);
+                 * parseXmlContent(reader, details);
+                 */
 
-                if (event == XMLStreamConstants.START_ELEMENT && "row".equals(reader.getLocalName())) {
-                    totalPosts++;
-
-                    // Get creation date
-                    String creationDate = reader.getAttributeValue(null, "CreationDate");
-                    if (creationDate != null) {
-                        LocalDateTime postDate = LocalDateTime.parse(creationDate, DATE_FORMATTER);
-                        
-                        if (firstPost == null || postDate.isBefore(firstPost)) {
-                            firstPost = postDate;
-                        }
-                        if (lastPost == null || postDate.isAfter(lastPost)) {
-                            lastPost = postDate;
-                        }
-                    }
-
-                    // Check if post is accepted
-                    String acceptedAnswerId = reader.getAttributeValue(null, "AcceptedAnswerId");
-                    if (acceptedAnswerId != null && !acceptedAnswerId.isEmpty()) {
-                        totalAcceptedPosts++;
-                    }
-
-                    // Get score
-                    String score = reader.getAttributeValue(null, "Score");
-                    if (score != null) {
-                        scoreSum += Double.parseDouble(score);
-                    }
-                }
+                SAXParserFactory factory = SAXParserFactory.newInstance();
+                factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+                SAXParser saxParser = factory.newSAXParser();
+                PostHandler handler = new PostHandler(details);
+                saxParser.parse(new InputSource(stream), handler);
+                timing.endDownload();
             }
 
-            // Set the details
-            details.setTotalPosts(totalPosts);
-            details.setTotalAcceptedPosts(totalAcceptedPosts);
-            details.setFirstPost(firstPost);
-            details.setLastPost(lastPost);
-            details.setAvgScore(totalPosts > 0 ? scoreSum / totalPosts : 0);
-            
+            timing.logTimings();
             response.setDetails(details);
+            return response;
 
-        } catch (XMLStreamException | IOException e) {
+        } catch (Exception e) {
             throw new XmlAnalysisException("Error analyzing XML file: " + e.getMessage(), e);
         }
+    }
 
-        return response;
+    private class PostHandler extends DefaultHandler {
+        private final Details details;
+        private int totalPosts = 0;
+        private int totalAcceptedPosts = 0;
+        private long scoreSum = 0;
+        private LocalDateTime firstPostDate = null;
+        private LocalDateTime lastPostDate = null;
+
+        public PostHandler(Details details) {
+            this.details = details;
+        }
+
+        @Override
+        public void startElement(String uri, String localName, String qName, Attributes attributes) {
+            if ("row".equals(qName)) {
+                totalPosts++;
+
+                if (attributes.getValue("AcceptedAnswerId") != null) {
+                    totalAcceptedPosts++;
+                }
+
+                scoreSum += Optional.ofNullable(attributes.getValue("Score"))
+                        .map(Integer::parseInt)
+                        .orElse(0);
+
+                LocalDateTime postDate = parseDateTime(attributes.getValue("CreationDate")).orElse(null);
+                if (firstPostDate == null) {
+                    firstPostDate = postDate;
+                }
+                if (postDate != null) {
+                    lastPostDate = postDate;
+                }
+            }
+        }
+
+        @Override
+        public void endDocument() {
+            details.setTotalPosts(totalPosts);
+            details.setTotalAcceptedPosts(totalAcceptedPosts);
+            details.setFirstPostDate(firstPostDate);
+            details.setLastPostDate(lastPostDate);
+            details.setAvgScore(totalPosts > 0 ? scoreSum / totalPosts : 0);
+        }
+    }
+
+    private static class TimingMetrics {
+        private long startTime;
+        private long totalTime;
+
+        void startDownload() {
+            startTime = System.currentTimeMillis();
+        }
+
+        void endDownload() {
+            totalTime = System.currentTimeMillis() - startTime;
+        }
+
+        void logTimings() {
+            System.out.println("Total processing time: " + totalTime + "ms");
+        }
+
     }
 
     private String extractFileName(String url) {
-        return url.substring(url.lastIndexOf('/') + 1);
+        return Optional.of(url)
+                .filter(u -> u.contains("/"))
+                .map(u -> u.substring(u.lastIndexOf('/') + 1))
+                .orElse(url);
     }
-} 
+
+    private Optional<LocalDateTime> parseDateTime(String str) {
+        try {
+            return Optional.ofNullable(str)
+                    .map(s -> LocalDateTime.parse(s, DATE_FORMATTER));
+        } catch (Exception e) {
+            return Optional.empty();
+        }
+    }
+}

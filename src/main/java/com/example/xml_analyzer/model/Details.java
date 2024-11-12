@@ -3,27 +3,26 @@ package com.example.xml_analyzer.model;
 import java.time.LocalDateTime;
 
 public class Details {
-    private LocalDateTime firstPost;
-    private LocalDateTime lastPost;
+    private LocalDateTime firstPostDate;
+    private LocalDateTime lastPostDate;
     private long totalPosts;
     private long totalAcceptedPosts;
     private double avgScore;
 
-    // Getters and setters
-    public LocalDateTime getFirstPost() {
-        return firstPost;
+    public LocalDateTime getFirstPostDate() {
+        return firstPostDate;
     }
 
-    public void setFirstPost(LocalDateTime firstPost) {
-        this.firstPost = firstPost;
+    public void setFirstPostDate(LocalDateTime firstPostDate) {
+        this.firstPostDate = firstPostDate;
     }
 
-    public LocalDateTime getLastPost() {
-        return lastPost;
+    public LocalDateTime getLastPostDate() {
+        return lastPostDate;
     }
 
-    public void setLastPost(LocalDateTime lastPost) {
-        this.lastPost = lastPost;
+    public void setLastPostDate(LocalDateTime lastPostDate) {
+        this.lastPostDate = lastPostDate;
     }
 
     public long getTotalPosts() {
@@ -49,4 +48,4 @@ public class Details {
     public void setAvgScore(double avgScore) {
         this.avgScore = avgScore;
     }
-} 
+}

@@ -1,4 +1,4 @@
-FROM amazoncorretto:23-alpine as build
+FROM amazoncorretto:23-alpine3.17 as build
 WORKDIR /workspace/app
 
 COPY mvnw .
@@ -9,7 +9,7 @@ COPY src src
 RUN ./mvnw install -DskipTests
 RUN mkdir -p target/dependency && (cd target/dependency; jar -xf ../*.jar)
 
-FROM amazoncorretto:23-alpine
+FROM amazoncorretto:23-alpine3.17
 VOLUME /tmp
 ARG DEPENDENCY=/workspace/app/target/dependency
 COPY --from=build ${DEPENDENCY}/BOOT-INF/lib /app/lib
